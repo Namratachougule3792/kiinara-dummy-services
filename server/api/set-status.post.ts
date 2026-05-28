@@ -1,58 +1,65 @@
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig()
-  const { supabaseUrl, supabaseKey } = config
   const body = await readBody(event)
   const { serviceId, status } = body
 
+  if (!serviceId || !status) {
+    return { error: 'serviceId and status are required' }
+  }
+
+  const config = useRuntimeConfig()
+  const supabaseUrl = config.public.supabaseUrl
+  const supabaseKey = config.public.supabaseKey
+
   const headers = {
-    'apikey': supabaseKey,
-    'Authorization': `Bearer ${supabaseKey}`,
     'Content-Type': 'application/json',
+    'apikey': supabaseKey,
+    'Authorization': 'Bearer ' + supabaseKey,
     'Prefer': 'resolution=merge-duplicates'
   }
 
-  // 1. Update current state
-  const stateRes = await fetch(`${supabaseUrl}/rest/v1/dummy_service_states`, {
+  const errorMsg = status === 'outage' ? 'manually triggered outage' : null
+  const responseTime = status === 'operational' ? Math.floor(Math.random() * 200) + 50 : 0
+
+  // Upsert dummy_service_states
+  const stateRes = await fetch(supabaseUrl + '/rest/v1/dummy_service_states', {
     method: 'POST',
     headers,
     body: JSON.stringify({
       service_id: serviceId,
-      status,
+      status: status,
       updated_at: new Date().toISOString()
     })
   })
 
-  // 2. Write REAL log to health_checks immediately
-  // Map button status to health_check status + response time
-  const responseTime = status === 'operational' ? Math.floor(Math.random() * 200) + 50   // 50-250ms realistic
-                     : status === 'degraded'    ? Math.floor(Math.random() * 2000) + 1000 // 1000-3000ms slow
-                     : 0 // outage = no response
+  if (!stateRes.ok) {
+    const err = await stateRes.text()
+    console.error('dummy_service_states error:', err)
+    return { error: 'Failed to update state: ' + err }
+  }
 
-  const errorText = status === 'outage' ? 'Service unavailable - manually triggered' : null
-
-  const logRes = await fetch(`${supabaseUrl}/rest/v1/health_checks`, {
+  // Insert health_checks log
+  const logRes = await fetch(supabaseUrl + '/rest/v1/health_checks', {
     method: 'POST',
-    headers: { ...headers, 'Prefer': 'return=minimal' },
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': supabaseKey,
+      'Authorization': 'Bearer ' + supabaseKey,
+      'Prefer': 'return=minimal'
+    },
     body: JSON.stringify({
       service_id: serviceId,
-      status,           // 'operational', 'degraded', or 'outage'
+      status: status,
       response_time: responseTime,
-      error: errorText,
-      checked_at: new Date().toISOString()
+      checked_at: new Date().toISOString(),
+      error: errorMsg
     })
   })
 
-  if (!stateRes.ok || !logRes.ok) {
-    throw createError({ statusCode: 500, message: 'Failed to update status' })
+  if (!logRes.ok) {
+    const err = await logRes.text()
+    console.error('health_checks error:', err)
+    return { error: 'Failed to insert log: ' + err }
   }
 
-  return {
-    success: true,
-    logged: {
-      service_id: serviceId,
-      status,
-      response_time: responseTime,
-      checked_at: new Date().toISOString()
-    }
-  }
+  return { success: true, serviceId, status }
 })

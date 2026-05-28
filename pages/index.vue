@@ -1,165 +1,132 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+
+const config = useRuntimeConfig()
 
 const SERVICES = [
-  { id: 'kiinara-identity',  name: 'Kiinara Identity',  icon: '🔐', description: 'Authentication & user identity' },
-  { id: 'kiinara-core',      name: 'Kiinara Core',      icon: '⚙️', description: 'Management Software' },
-  { id: 'kiinara-accounts',  name: 'Kiinara Accounts',  icon: '🏫', description: 'Accounts management' },
-  { id: 'pulse-email',       name: 'Pulse — Email',     icon: '📧', description: 'Email delivery service' },
-  { id: 'pulse-whatsapp',    name: 'Pulse — WhatsApp',  icon: '💬', description: 'WhatsApp messaging service' },
+  { id: 'kiinara-identity', name: 'Kiinara Identity',  description: 'Authentication & user identity', icon: '🔐' },
+  { id: 'kiinara-core',     name: 'Kiinara Core',      description: 'Management Software',            icon: '⚙️' },
+  { id: 'kiinara-accounts', name: 'Kiinara Accounts',  description: 'Accounts management',            icon: '🏫' },
+  { id: 'pulse-email',      name: 'Pulse — Email',     description: 'Email delivery service',         icon: '📧' },
+  { id: 'pulse-whatsapp',   name: 'Pulse — WhatsApp',  description: 'WhatsApp messaging service',     icon: '💬' }
 ]
 
-const states = ref(Object.fromEntries(SERVICES.map(s => [s.id, 'operational'])))
-const loading = ref(Object.fromEntries(SERVICES.map(s => [s.id, false])))
-const lastLog = ref(Object.fromEntries(SERVICES.map(s => [s.id, null])))
+const states = ref({})
+const loading = ref(false)
+const feedback = ref(null)
+
+SERVICES.forEach(s => { states.value[s.id] = 'operational' })
 
 const setStatus = async (serviceId, status) => {
-  loading.value[serviceId] = true
-  lastLog.value[serviceId] = null
-
+  loading.value = true
+  feedback.value = null
   try {
-    const res = await fetch('/api/set-status', {
+    const res = await $fetch('/api/set-status', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serviceId, status })
+      body: { serviceId, status }
     })
-    const data = await res.json()
-
-    if (data.success) {
+    if (res.success) {
       states.value[serviceId] = status
-      // Show the REAL log that was written to health_checks
-      lastLog.value[serviceId] = {
-        type: status,
-        service_id: data.logged.service_id,
-        status: data.logged.status,
-        response_time: data.logged.response_time,
-        checked_at: new Date(data.logged.checked_at).toLocaleTimeString(),
-        error: data.logged.error
-      }
+      feedback.value = { type: 'success', message: serviceId + ' set to ' + status }
+    } else {
+      feedback.value = { type: 'error', message: res.error || 'Failed' }
     }
   } catch (err) {
-    lastLog.value[serviceId] = { type: 'error', message: 'Failed to update — check console' }
+    feedback.value = { type: 'error', message: err.message }
   } finally {
-    loading.value[serviceId] = false
+    loading.value = false
+    setTimeout(() => { feedback.value = null }, 3000)
   }
 }
 
-const statusColor = {
-  operational: 'bg-emerald-500',
-  degraded: 'bg-amber-400',
-  outage: 'bg-red-500'
+const statusColor = (status) => {
+  if (status === 'operational') return 'text-green-400'
+  if (status === 'degraded') return 'text-amber-400'
+  return 'text-red-400'
 }
 
-const statusLabel = {
-  operational: 'Operational',
-  degraded: 'Degraded',
-  outage: 'Outage'
-}
-
-const logBg = {
-  operational: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  degraded: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  outage: 'bg-red-500/10 text-red-400 border-red-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20'
+const statusLabel = (status) => {
+  if (status === 'operational') return 'Operational'
+  if (status === 'degraded') return 'Degraded'
+  return 'Outage'
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
-    <!-- Header -->
-    <div class="border-b border-gray-800 px-8 py-5 flex items-center justify-between">
-      <div>
-        <h1 class="text-xl font-bold">Kiinara Service Simulator</h1>
-        <p class="text-gray-500 text-sm mt-0.5">
-          Each button click writes a real log to Supabase → status page updates instantly
-        </p>
-      </div>
-      <div class="flex items-center gap-2 text-xs text-gray-500">
-        <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block"/>
-        Live → Supabase
-      </div>
+<div class="min-h-screen bg-[#0f1117] text-white">
+  <div class="border-b border-[#1e2433] px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-base font-semibold text-white">Kiinara Service Simulator</h1>
+      <p class="text-xs text-slate-500 mt-0.5">Each button click writes a real log to Supabase → status page updates instantly</p>
     </div>
-
-    <div class="max-w-3xl mx-auto px-6 py-10 space-y-4">
-      <div
-        v-for="svc in SERVICES"
-        :key="svc.id"
-        class="bg-gray-900 border border-gray-800 rounded-xl p-6"
-      >
-        <!-- Service header -->
-        <div class="flex items-center justify-between mb-5">
-          <div class="flex items-center gap-3">
-            <span class="text-2xl">{{ svc.icon }}</span>
-            <div>
-              <p class="font-semibold text-white">{{ svc.name }}</p>
-              <p class="text-xs text-gray-500 mt-0.5">{{ svc.description }}</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span :class="['w-2.5 h-2.5 rounded-full', statusColor[states[svc.id]]]"/>
-            <span class="text-sm text-gray-300 font-medium">{{ statusLabel[states[svc.id]] }}</span>
-          </div>
-        </div>
-
-        <!-- 3 buttons -->
-        <div class="flex gap-3">
-          <button
-            v-for="btn in [
-              { status: 'operational', label: '✓ Healthy',  active: 'bg-emerald-600 border-emerald-500', idle: 'hover:border-emerald-600 hover:text-emerald-400' },
-              { status: 'degraded',    label: '⚠ Degraded', active: 'bg-amber-600 border-amber-500',   idle: 'hover:border-amber-500 hover:text-amber-400' },
-              { status: 'outage',      label: '✗ Outage',   active: 'bg-red-700 border-red-600',       idle: 'hover:border-red-600 hover:text-red-400' }
-            ]"
-            :key="btn.status"
-            @click="setStatus(svc.id, btn.status)"
-            :disabled="loading[svc.id]"
-            :class="[
-              'flex-1 py-2.5 rounded-lg text-sm font-medium transition-all border disabled:opacity-50',
-              states[svc.id] === btn.status
-                ? btn.active + ' text-white'
-                : 'bg-gray-800 border-gray-700 text-gray-400 ' + btn.idle
-            ]"
-          >
-            {{ loading[svc.id] ? '...' : btn.label }}
-          </button>
-        </div>
-
-        <!-- Real log feedback -->
-        <div
-          v-if="lastLog[svc.id]"
-          :class="['mt-3 px-4 py-3 rounded-lg text-xs border font-mono', logBg[lastLog[svc.id].type]]"
-        >
-          <div v-if="lastLog[svc.id].status" class="space-y-0.5">
-            <p>
-              <span class="opacity-60">logged to health_checks →</span>
-              <span class="font-bold ml-1">{{ lastLog[svc.id].status }}</span>
-            </p>
-            <p>
-              <span class="opacity-60">response_time:</span>
-              <span class="ml-1">{{ lastLog[svc.id].response_time }}ms</span>
-              <span class="opacity-60 ml-3">at:</span>
-              <span class="ml-1">{{ lastLog[svc.id].checked_at }}</span>
-            </p>
-            <p v-if="lastLog[svc.id].error">
-              <span class="opacity-60">error:</span>
-              <span class="ml-1">{{ lastLog[svc.id].error }}</span>
-            </p>
-          </div>
-          <p v-else>{{ lastLog[svc.id].message }}</p>
-        </div>
-      </div>
-
-      <!-- Endpoint reference -->
-      <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
-        <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
-          Health Endpoints (pinged by scheduler)
-        </p>
-        <div class="space-y-1.5 font-mono text-xs">
-          <p v-for="svc in SERVICES" :key="svc.id" class="text-gray-400">
-            <span class="text-gray-600">GET </span>
-            <span class="text-blue-400">/api/health/{{ svc.id }}</span>
-          </p>
-        </div>
-      </div>
+    <div class="flex items-center gap-2 text-xs text-slate-500">
+      <div class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+      Live → Supabase
     </div>
   </div>
+
+  <div class="max-w-2xl mx-auto px-6 py-8 space-y-4">
+
+    <div
+      v-if="feedback"
+      :class="feedback.type === 'success' ? 'bg-green-900/30 border-green-700 text-green-400' : 'bg-red-900/30 border-red-700 text-red-400'"
+      class="border rounded-lg px-4 py-3 text-sm mb-4"
+    >
+      {{ feedback.message }}
+    </div>
+
+    <div
+      v-for="svc in SERVICES"
+      :key="svc.id"
+      class="bg-[#141824] border border-[#1e2433] rounded-xl p-5"
+    >
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <span class="text-xl">{{ svc.icon }}</span>
+          <div>
+            <p class="text-sm font-semibold text-white">{{ svc.name }}</p>
+            <p class="text-xs text-slate-500">{{ svc.description }}</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div
+            :class="states[svc.id] === 'operational' ? 'bg-green-500' : states[svc.id] === 'degraded' ? 'bg-amber-400' : 'bg-red-500'"
+            class="w-2 h-2 rounded-full"
+          />
+          <span :class="statusColor(states[svc.id])" class="text-xs font-medium">
+            {{ statusLabel(states[svc.id]) }}
+          </span>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <button
+          @click="setStatus(svc.id, 'operational')"
+          :disabled="loading"
+          :class="states[svc.id] === 'operational' ? 'bg-green-600 border-green-500' : 'bg-[#0f1117] border-[#1e2433] text-slate-400 hover:border-green-700 hover:text-green-400'"
+          class="flex-1 border rounded-lg py-2 text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          ✓ Healthy
+        </button>
+        <button
+          @click="setStatus(svc.id, 'degraded')"
+          :disabled="loading"
+          :class="states[svc.id] === 'degraded' ? 'bg-amber-600 border-amber-500' : 'bg-[#0f1117] border-[#1e2433] text-slate-400 hover:border-amber-700 hover:text-amber-400'"
+          class="flex-1 border rounded-lg py-2 text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          ⚠ Degraded
+        </button>
+        <button
+          @click="setStatus(svc.id, 'outage')"
+          :disabled="loading"
+          :class="states[svc.id] === 'outage' ? 'bg-red-600 border-red-500' : 'bg-[#0f1117] border-[#1e2433] text-slate-400 hover:border-red-700 hover:text-red-400'"
+          class="flex-1 border rounded-lg py-2 text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          ✕ Outage
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
 </template>
